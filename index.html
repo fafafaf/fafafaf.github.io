@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf8">
+  <title>SupCom ReplayParser</title>
+   <script src="js/d3.min.js"></script>
+   <script src="js/inflate.min.js"></script>
+   <script src="js/replayParser.js"></script>
+   <script src="js/unitsdb.js"></script>
+   <link href="css/sprites.css" rel="stylesheet" />
+   <link href="css/style.css" rel="stylesheet" />
+  <script>
+  function genchart() {
+	var graphdata = []
+	for(var i=0;i<cmds.length;i++) {
+		graphdata[i] = new Uint16Array(ticks + 600);
+		cmds[i].forEach(function(v,k) { graphdata[i][k] = v;})
+		var sum = 0;
+		var prevtick = 0;
+		for(var j=0;j<600;j++)
+			sum += graphdata[i][j];
+		for(var j=0;j<ticks;j++) {
+			sum = sum - prevtick + graphdata[i][j+600]
+			prevtick = graphdata[i][j];
+			graphdata[i][j] = sum;
+		}
+	}
+	
+	var m = [80, 80, 80, 80]; // margins
+	var w = 1150 - m[1] - m[3]; // width
+	var h = 400 - m[0] - m[2]; // height 
+
+	var PlayerColors = [ // this is from faf.nxt/lua/GameColors.lua
+				"#436eee",      // new blue1
+				"#e80a0a",      // Cybran red
+				"#616d7e",      // grey
+				"#fafa00",      // new yellow
+				'#FF873E',      // Nomads orange
+				"#ffffff",      // white
+				"#9161ff",      // purple
+				"#ff88ff",      // pink
+				"#2e8b57",      // new green
+				"#131cd3",      // UEF blue
+				"#5F01A7",      // dark purple
+				"#ff32ff",      // new fuschia
+				"#ffbf80",      // lt orange
+				"#b76518",      // new brown
+				"#901427",      // dark red
+				"#2F4F4F",      // olive (dark green)
+				"#40bf40",      // mid green
+				"#66ffcc",      // aqua
+			];
+
+	document.getElementById("graph").innerHTML="";
+	document.getElementById("info").innerHTML = "";
+	document.getElementById("actions").innerHTML = "";
+	var allmax = 0;
+	for(var i=0;i<cmds.length;i++) {
+		var _max = Math.max.apply(null, graphdata[i]);
+		if (_max>allmax)
+			allmax = _max;
+	}
+	var x = d3.scale.linear().domain([0, ticks]).range([0, w]);
+	var y = d3.scale.linear().domain([0, allmax]).range([h, 0]);
+
+	var line = d3.svg.line()
+		.x(function(d,i) { return x(i); })
+		.y(function(d) { return y(d); })
+	 
+
+	var graph = d3.select("#graph")
+		.append("svg:svg")
+		.attr("width", w + m[1] + m[3])
+		.attr("height", h + m[0] + m[2])
+		.on("mousemove", mousemove)
+		.append("svg:g")
+		.attr("transform", "translate(" + m[3] + "," + m[0] + ")");
+	 
+
+	var xAxis = d3.svg.axis()
+		.scale(x)
+		.orient("bottom")
+		.tickFormat(function(d) { return ticktotime(d); })
+		.ticks(10);
+
+	var yAxis = d3.svg.axis()
+		.scale(y)
+		.orient("left")
+		.ticks(5);
+
+
+	var legend = graph.append("g")
+			  .attr("class", "legend")
+			  .attr("x", w - 65)
+			  .attr("y", 25)
+			  .attr("height", 100)
+			  .attr("width", 100);
+
+	for(var i=0;i<cmds.length;i++) {
+		graph.append("svg:path").attr("d", line(graphdata[i].subarray(0,ticks))).style("stroke", PlayerColors[i]);
+
+		legend.append("rect")
+			.attr("x", w - 65)
+			.attr("y", i*25)
+			.attr("width", 10)
+			.attr("height", 10)
+			.style("fill", PlayerColors[i]);
+		
+		legend.append("text")
+			.attr("x", w - 50)
+			.attr("y", i * 25 + 8)
+			.attr("height",30)
+			.attr("width",100)
+			.style("fill", PlayerColors[i])
+			.text(army[i]["PlayerName"]);
+	}
+
+	graph.append("svg:text")
+	   .attr("class", "title")
+	   .attr("x", 20)
+	   .attr("y", 20)
+	   .text("Commands per Minute");
+
+	
+	graph.append("g")
+		.attr("class", "axis")
+		.attr("transform", "translate(0," + h + ")")
+		.call(xAxis);
+
+	graph.append("g")
+		.attr("class", "axis")
+		.attr("transform", "translate(0,0)")
+		.call(yAxis);
+	
+	 function mousemove() {
+		var tick = (d3.mouse(this)[0]- m[1] > 0)?x.invert(d3.mouse(this)[0]-m[1])|0:0;
+		h = "<p><center>Timeframe: "  + ticktotime(tick) + " - " + ticktotime(tick+600) +  "</center><p>";
+		for(player in army.filter(function(v,k){ return k!=255})) {
+			h += "<div class=\"head\">" + army[player]["PlayerName"] + "</div><p>";
+			army[player]["commands"]
+				.filter(function(cmd) { return cmd["tick"]>tick && cmd["tick"]+600})
+				.forEach(function(cmd) {
+					switch(EUnitCommandType[cmd["type"]]) {
+						case "BuildFactory":
+						case "BuildMobile":
+						case "Upgrade":
+							h += "<span class=\"unit " + cmd["bp"].toUpperCase() + "\" title=\"" + unitNames[cmd["bp"]] + "\"></span>"; 
+							break;
+						case "Script":
+							h += EUnitCommandType[cmd["type"]] + ": " + cmd["lua"]["Enhancement"] + ", "; 
+							break;
+						default:
+							h += "<span class=\"action " + EUnitCommandType[cmd["type"]].toLowerCase() + "_btn_up\" title=\"" + EUnitCommandType[cmd["type"]] + "\"></span>";
+					};
+				});
+			h += "</p>";
+		}
+		document.getElementById("actions").innerHTML = h;
+	 }
+	 
+	 /* grouped bar chart */
+	 
+	var data = [];
+	var playerNames = [];
+	for(player in army) {
+		if (player == 255) continue;
+		playerNames.push(army[player]["PlayerName"]);
+		data[player] = {
+			"Build": army[player]["commands"].filter(function(cmd) { return EUnitCommandType[cmd["type"]] == "BuildFactory" || EUnitCommandType[cmd["type"]] == "BuildMobile"}).length,
+			"Move": army[player]["commands"].filter(function(cmd) { return EUnitCommandType[cmd["type"]] == "Move"}).length,
+			"Attack": army[player]["commands"].filter(function(cmd) { return EUnitCommandType[cmd["type"]] == "Attack"}).length,
+			"Reclaim": army[player]["commands"].filter(function(cmd) { return EUnitCommandType[cmd["type"]] == "Reclaim"}).length,
+			"Everything else": army[player]["commands"].filter(function(cmd) { return EUnitCommandType[cmd["type"]] != "BuildFactory" && EUnitCommandType[cmd["type"]] != "BuildMobile" && EUnitCommandType[cmd["type"]] != "Reclaim" && EUnitCommandType[cmd["type"]] != "Attack" && EUnitCommandType[cmd["type"]] != "Move"}).length,
+			}
+	}
+	
+	document.getElementById("actionDist").innerHTML = "";
+	var graph_ad = d3.select("#actionDist")
+		.append("svg:svg")
+		.attr("width", w + m[1] + m[3])
+		.attr("height", h + m[0] + m[2])
+		.append("svg:g")
+		.attr("transform", "translate(" + m[3] + "," + m[0] + ")");
+	
+	var y_ad = d3.scale.linear().range([h, 0]);
+	var x0_ad = d3.scale.ordinal().rangeRoundBands([0, w], .1);
+	var x1_ad = d3.scale.ordinal();
+	var color = d3.scale.ordinal().range(["#ff8c00","#d0743c","#a05d56","#6b486b","#7b6888","#8a89a6","#98abc5"]);
+
+	var xAxis_ad = d3.svg.axis()
+		.scale(x0_ad)
+		.orient("bottom");
+	 
+	var yAxis_ad = d3.svg.axis()
+		.scale(y_ad)
+		.orient("left")
+		.tickFormat(d3.format(".2s"));
+	
+	var barNames = d3.keys(data[0]);
+	x0_ad.domain(playerNames);
+	x1_ad.domain(barNames).rangeRoundBands([0, x0_ad.rangeBand()]);
+	y_ad.domain([0, d3.max(data, function(d) { return d3.max(d3.values(d))})]);
+	
+	for(player in data) {
+		var pgroup = graph_ad.append("g")
+			.attr("class", "g")
+			.attr("transform", function() { return "translate(" + x0_ad(playerNames[player]) + ",0)"; });
+		
+		for(bar in barNames) {
+			var barName = barNames[bar]
+			pgroup.append("rect")
+				.attr("width", x1_ad.rangeBand())
+				.attr("x", x1_ad(barName) )
+				.attr("y", y_ad(data[player][barName]))
+				.attr("height", h - y_ad(data[player][barName]))
+				.style("fill", color(barName))
+				.append("svg:title")
+				.text(data[player][barName]);
+			
+			pgroup.append("text")
+				.attr("class", "percent")
+				.attr("x", x1_ad(barName) + x1_ad.rangeBand()/2 )
+				.attr("y", y_ad(data[player][barName]) - 10)
+				.attr("text-anchor", "middle")
+				.text(((data[player][barName] / army[player]["commands"].length * 100)|0) + "%");
+		}
+		
+	}
+	
+	 var legend = graph_ad.selectAll(".legend")
+		.data(barNames.slice())
+		.enter().append("g")
+		.attr("class", "legend")
+		.attr("transform", function(d, i) { return "translate(0," + i * 20 + ")"; });
+	
+	 legend.append("rect")
+		.attr("x", w - 18)
+		.attr("width", 18)
+		.attr("height", 18)
+		.style("fill", color);
+		 
+	legend.append("text")
+		.attr("x", w - 24)
+		.attr("y", 9)
+		.attr("dy", ".35em")
+		.style("text-anchor", "end")
+		.text(function(d) { return d; });
+	
+	graph_ad.append("g")
+			.attr("class", "y axis")
+			.call(yAxis_ad)
+			.append("text")
+			.attr("transform", "rotate(-90)")
+			.attr("y", 6)
+			.attr("dy", ".71em")
+			.style("text-anchor", "end")
+			.text("Num. of commands");
+	
+	graph_ad.append("g")
+			.attr("class", "x axis")
+			.attr("transform", "translate(0," + h + ")")
+			.call(xAxis_ad);
+		
+  } // end of genchart
+  function geninfo() {
+	var teams = []; var teamid = 1; var noteam=0;
+	for(var i=0;i<cmds.length;i++) {
+		var teamNum = (army[i]["Team"] == 1?100 + noteam++:army[i]["Team"]);
+		if (teamNum in teams)
+			teams[teamNum].push(i);
+		else
+			teams[teamNum] = [i];
+	}
+  
+	html = "<center><h2>" + verstring + "</h2>";
+	var hostedby = "";
+	if("host" in fafinfo) {
+		hostedby = "<br/>host: <font color=\"white\">" + fafinfo["host"] + "</font>";
+	}
+	html += "<h2><font color=\"white\">" + fafinfo["title"] + "</font> on <font color=\"white\">" + scenario["name"] +  "</font>" + hostedby + "</h2>";
+	html += "<img src=\"" + "//content.faforever.com/faf/vault/map_previews/small/" + scenario["map"].split("/")[2].toLowerCase() + ".png" + "\" title=\""+ scenario["name"] +"\"/>";
+	if(scenario["description"])
+		html += "<p id=\"mapdesc\">" + scenario["description"].replace(/<.*>/,"") + "</p>";
+	html += "<h3>runtime: <font color=\"white\">" + ticktotime(ticks) + "</font></h3>";
+	
+	if (fafinfo["game_time"] && fafinfo["game_end"]) {
+		var startDate = new Date(fafinfo["game_time"]*1000);
+		var endDate = new Date(fafinfo["game_end"]*1000);
+		
+		if (startDate.getDay() == endDate.getDay())
+			html += "<h4>" + startDate.toLocaleDateString() + "<br/> " + startDate.toLocaleTimeString() + " - " + endDate.toLocaleTimeString() + "</h4></center>";
+		else
+			html += "<h4>" + startDate.toISOString().replace(/[TZ]/g," ") + " - " + endDate.toISOString().replace(/[TZ]/g," ") + "</h4></center>";
+	} else if("game_end" in fafinfo) {
+		var endDate = new Date(fafinfo["game_end"]*1000);
+		html += "<h4>finished: <font color=\"white\">" + endDate.toISOString().replace(/[TZ]/g," ") + "</font></h4></center>";
+	}
+	html += "";
+	
+	html += "<div id=\"teams\">";
+	teams.forEach(function(team,i) {
+		html += "<table class=\"team\">";
+		html += "<tr><th bgcolor=grey colspan=3><font color=white>team " + teamid + "</font></th></tr>";
+		team.forEach(function(id){
+			countryflag = army[id]["COUNTRY"] || army[id]["Country"] || false;
+			html += "<tr><td><span class=\"factions fac" + army[id]["Faction"] + "\"></span></td>";
+			if (countryflag)
+				html += "<td><span title=\"" + countryflag + "\" class=\"flag " + countryflag + "\"></span></td>";
+			html += "<td width=\"100%\"><b>" + army[id]["PlayerName"] + "</b><br/>";
+			if ("MEAN", "DEV" in army[id])
+				html += "Rating: " + Math.round(army[id]['MEAN'] - 3*army[id]['DEV'])
+			if (id in lasttick)
+				html += " apm: " + Math.round(cmds[id].reduce(function (curr, prev) { return curr + prev; }) / (lasttick[id] / 10 / 60));
+			else
+				html += " apm: " + Math.round(cmds[id].reduce(function (curr, prev) { return curr + prev; }) / (ticks / 10 / 60));
+			html += "</td></tr>";
+		});
+		html += "</table>";
+		teamid++;
+	});
+	html += "</div>";
+	html += "<div  id=\"options\"><table><tr><th colspan=\"2\">Options</th></tr>";
+	for(var k in scenario["Options"]) {
+		if (k != "ScenarioFile" && k != "Ratings") {
+			var v = scenario["Options"][k];
+			if (typeof(v) == "object") {
+				html += "<tr><td>" + k + "</td><td>&nbsp;</td></tr>";
+				for(var k2 in v) {
+					var v2 = v[k2];
+					html += "<tr><td style=\"padding-left: 5%\"><i>" + k2 + "</i></td><td>" + v2 + "</td></tr>";
+				}
+			} else
+				html += "<tr><td>" + k + "</td><td>" + v + "</td></tr>";
+		}
+	}
+	html += "</table></div>";
+	if (chat.length>0) {
+		html += "<div id=\"chat\"><div class=\"head\">Chat</div>";
+		chat.forEach(function(line) {
+			html += "<li>" + line;
+		});
+		html+= "</div>";
+	}
+	document.getElementById("info").innerHTML = html;
+  }
+  window.onload = function() {
+	var reader = new FileReader();
+	var fileInput = document.getElementById('fileInput');
+	
+	reader.onload = function(e) {
+		if (reader.result.length > 0) {
+				document.getElementById("hint").style.display = "none";
+				document.getElementById("status").style.display = "block";
+				try{
+					var replay = reader.result.split('\n',2);
+					if (replay[0].match("Supreme Commander")) {
+						var filebuf = new Uint8Array(reader.result.length);
+						reader.result.split('').map(function(e,idx) { filebuf[idx] = e.charCodeAt(0);});
+						fafinfo = {"title": ""};
+						setTimeout(function() {
+							try{
+								ReplayParser(filebuf);
+								genchart();
+								geninfo();
+							}catch(e) {
+								alert(e);
+							}finally{
+								document.getElementById("status").style.display = "none";
+							}
+						}, 10);
+					}
+					else {
+						fafinfo = JSON.parse(replay[0]);
+						var compressed = atob(replay[1]).split('').map(function(e) {
+							return e.charCodeAt(0);
+						});
+						
+						var inflate = new Zlib.Inflate(compressed,{index: 4,resize:true});
+						setTimeout(function() {
+							try{
+								ReplayParser(inflate.decompress());
+								genchart();
+								geninfo();
+							}catch(e) {
+								alert(e);
+							}finally{
+								document.getElementById("status").style.display = "none";
+							}
+						}, 10);
+					}
+				}catch(e) {
+					document.getElementById("status").style.display = "none";
+					alert("Cant parse this file");
+				}
+		}
+	}
+	
+	fileInput.addEventListener('change', function(e) {
+		var file = fileInput.files[0];	
+		reader.readAsBinaryString(file);
+    });
+	
+	window.addEventListener("dragover",function(e){
+		e = e || event;
+		e.preventDefault();
+	},false);
+	
+	window.addEventListener("drop",function(e){
+		e = e || event;
+		e.preventDefault();
+		var file = e.dataTransfer.files[0];	
+		reader.readAsBinaryString(file);
+	},false);
+	
+	document.getElementById("load").addEventListener("click", function(e) {
+		if (document.getElementById("replayid").checkValidity()) {
+			var id = document.getElementById("replayid").value;
+			window.location.hash = id;
+			loadbyid(id)
+		}
+	},false);
+	
+	function loadbyid(id) {
+		var xhr = new XMLHttpRequest();
+		xhr.open('GET', '//content.faforever.com/faf/vault/replay_vault/replay.php?id=' + id, true);
+		xhr.responseType = 'blob';
+		xhr.onload = function(e) {
+		  if (this.status == 200) {
+			reader.readAsBinaryString(this.response);
+		  }
+		};
+		xhr.send();
+	}
+  
+	if(window.location.hash) {
+		var id = window.location.hash.substring(1);
+		if(parseInt(id) == id) {
+			loadbyid(id);
+		}
+	}
+  }
+  function updatefooter(d) {
+	var commit = d.values[0];
+	document.getElementById("footer").innerHTML += " - <span title=\"" + commit["message"] + "\">Last change: " + new Date(commit["date"]).toLocaleString() + "</span>";
+  }
+  </script>
+  <script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-49297813-1', 'bitbucket.org');
+  ga('send', 'pageview');
+  </script>
+</head>
+<body>
+  <div id="container">
+  <div id="status" style="display:none"><div id="statusinner">Parsing the replay...</div></div>
+    <div id="uploadForm">
+	  <h1>SupCom ReplayParser in javascript</h1>
+      Select a replay: <input type="file" id="fileInput" accept=".fafreplay,.SCFAReplay"><br/>
+      Load replay from FAF by id: <input size="8" maxlength="8" pattern="[0-9]*" id="replayid" placeholder="replay id"><button id="load">Load</button>
+    </div>
+	<div id="hint">
+		<h2>Hints</h2>
+		<p>
+		<li>You can find your replay in this folder: <span class="link">C:\Users\yourname\Documents\My Games\Gas Powered Games\Supreme Commander Forged Alliance\replays</span>.
+		</p>
+		<p>
+		<li>If you play on FAF, you can find your replays in this folder: <span class="link">C:\ProgramData\FAForever\replays</span>.
+		<li>You can also grab replays from the <span class="link"><a target="new" href="//content.faforever.com/faf/vault/replays_simple.php">FAF replay vault</a></span>
+		</p>
+		<p>
+		Drop a supcom replay file anywhere on this page.
+		</p>
+	</div>
+    <div id="info"></div>
+	<div id="actionDist"></div>
+	<div id="graph" class="aGraph" style=""></div>
+	<div id="actions"></div>
+	<div id="footer">
+		<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+		<input type="hidden" name="cmd" value="_s-xclick">
+		<input type="hidden" name="hosted_button_id" value="CLGP9YUYND9R8">
+		<input type="image" src="https://www.paypalobjects.com/en_GB/i/btn/btn_donate_SM.gif" border="0" name="submit" alt="PayPal � The safer, easier way to pay online.">
+		</form>
+		<h1 title="its a pizza">&#x1f355;</h1>2014 - PattogoTehen
+	</div>
+	<script async src="https://bitbucket.org/api/2.0/repositories/fafafaf/fafafaf.bitbucket.org/commits?pagelen=1&callback=updatefooter"></script>
+  </div>
+</body>
+</html>
