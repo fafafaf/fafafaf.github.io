@@ -4,7 +4,8 @@
   <meta charset="utf8">
   <title>SupCom ReplayParser</title>
    <script src="js/d3.min.js"></script>
-   <script src="js/inflate.min.js"></script>
+   <!-- Browserify https://github.com/yoshihitoh/zstd-codec -->
+   <script src="js/zstd.js"></script>
    <script src="js/replayParser.js"></script>
    <script src="js/unitsdb.js"></script>
    <link href="css/sprites.css" rel="stylesheet" />
@@ -346,58 +347,39 @@
   window.onload = function() {
 	var reader = new FileReader();
 	var fileInput = document.getElementById('fileInput');
-	
 	reader.onload = function(e) {
-		if (reader.result.length > 0) {
+		if (reader.result.byteLength > 0) {
 				document.getElementById("hint").style.display = "none";
 				document.getElementById("status").style.display = "block";
 				try{
-					var replay = reader.result.split('\n',2);
-					if (replay[0].match("Supreme Commander")) {
-						var filebuf = new Uint8Array(reader.result.length);
-						reader.result.split('').map(function(e,idx) { filebuf[idx] = e.charCodeAt(0);});
-						fafinfo = {"title": ""};
-						setTimeout(function() {
-							try{
-								ReplayParser(filebuf);
-								genchart();
-								geninfo();
-							}catch(e) {
-								alert(e);
-							}finally{
-								document.getElementById("status").style.display = "none";
-							}
-						}, 10);
-					}
-					else {
-						fafinfo = JSON.parse(replay[0]);
-						var compressed = atob(replay[1]).split('').map(function(e) {
-							return e.charCodeAt(0);
-						});
-						
-						var inflate = new Zlib.Inflate(compressed,{index: 4,resize:true});
-						setTimeout(function() {
-							try{
-								ReplayParser(inflate.decompress());
-								genchart();
-								geninfo();
-							}catch(e) {
-								alert(e);
-							}finally{
-								document.getElementById("status").style.display = "none";
-							}
-						}, 10);
-					}
+					var result = new Uint8Array(reader.result);
+					var splitindex = result.indexOf(10);
+					fafinfo = JSON.parse(new TextDecoder().decode(result.slice(0, splitindex)));
+					var compressed = result.slice(splitindex + 1);
+					var decompressed = ZstdSimple.decompress(compressed);
+
+					setTimeout(function() {
+						try{
+							ReplayParser(decompressed);
+							genchart();
+							geninfo();
+						}catch(e) {
+							alert(e);
+						}finally{
+							document.getElementById("status").style.display = "none";
+						}
+					}, 10);
+					
 				}catch(e) {
-					document.getElementById("status").style.display = "none";
-					alert("Cant parse this file");
+				 	document.getElementById("status").style.display = "none";
+				 	alert("Cant parse this file");
 				}
 		}
 	}
 	
 	fileInput.addEventListener('change', function(e) {
 		var file = fileInput.files[0];	
-		reader.readAsBinaryString(file);
+		reader.readAsArrayBuffer(file);
     });
 	
 	window.addEventListener("dragover",function(e){
@@ -422,14 +404,10 @@
 	
 	function loadbyid(id) {
 		var xhr = new XMLHttpRequest();
-		xhr.open('GET', '//content.faforever.com/faf/vault/replay_vault/replay.php?id=' + id, true);
-		xhr.responseType = 'blob';
-		xhr.onload = function(e) {
-		  if (this.status == 200) {
-			reader.readAsBinaryString(this.response);
-		  }
-		};
-		xhr.send();
+		var idParts = id.match(/.{1,2}/g).slice(0, 3).join('/');
+		fetch(`https://content.faforever.com/replays/0/${idParts}/${id}.fafreplay`)
+		.then((response) => response.blob())
+		.then((data) => reader.readAsArrayBuffer(data));
 	}
   
 	if(window.location.hash) {
